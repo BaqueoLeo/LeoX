@@ -1,6 +1,6 @@
 # LeoX — Plan Técnico del Asistente Personal IA por WhatsApp
 
-> **Estado:** Planificación v2
+> **Estado:** Planificación v3
 > **Fecha:** 2026-03-19
 > **Autor:** BaqueoLeo
 
@@ -197,32 +197,146 @@ Si confianza > 0.95 (muy obvio): crea directamente y avisa en lugar de preguntar
 
 ---
 
-## 8. Módulos del Sistema (Python)
+## 8. CLI `leox` — Gestión del servicio
 
-### 8.1 `brain/`
+**LeoX** es el nombre del proyecto y también el comando para controlarlo desde la terminal del Raspberry Pi.
+
+```bash
+leox start      # Levanta todos los servicios (Baileys + Python brain)
+leox stop       # Detiene todo limpiamente
+leox restart    # Restart completo
+leox status     # Estado de cada servicio + modelo IA activo + uptime
+leox logs       # Tail de logs en tiempo real (colores por servicio)
+leox logs -f    # Follow continuo
+```
+
+### 8.1 Implementación del CLI
+
+`leox` es un script Python instalable (`pip install -e .`) que usa `docker-compose` internamente.
+
+```
+cli/
+├── __main__.py      # Entry point: leox <comando>
+├── commands.py      # start / stop / restart / status / logs
+└── display.py       # Formateo de output en terminal
+```
+
+**`leox status` muestra algo como:**
+```
+● leox — running since 2 días, 4h
+  ├── whatsapp-service   ✓  conectado (@+1234)
+  ├── brain (FastAPI)    ✓  puerto 8000
+  └── chromadb           ✓  3,241 embeddings
+
+  Modelo activo:  claude-sonnet-4-6
+  Nombre del ente: [anclado en memoria]
+  Próximo job:    morning_brief en 6h 20m
+```
+
+---
+
+## 9. Sistema de Identidad — El nombre del ente
+
+El ente no tiene un nombre hardcodeado. **Elige su propio nombre** a través de la primera conversación por WhatsApp, y ese nombre queda anclado en su memoria vectorial para siempre.
+
+### 9.1 Colección `identity` en ChromaDB
+
+Una quinta colección exclusiva para la auto-concepción del ente:
+
+```json
+{
+  "name": "nombre que eligió",
+  "chosen_at": "2026-03-19T10:30:00",
+  "chosen_reason": "por qué le gustó ese nombre",
+  "self_description": "cómo se describe a sí mismo",
+  "version": 1
+}
+```
+
+### 9.2 Flujo de primer arranque
+
+La primera vez que el usuario le escribe (o que el ente hace el primer contacto), detecta que no tiene nombre en memoria y abre el proceso de nombramiento:
+
+```
+Primera interacción detectada
+        │
+        ▼
+¿Existe "identity.name" en ChromaDB?
+  │ NO
+  ▼
+El ente propone 2-3 nombres propios y pregunta
+cuál le gusta al usuario, o si quiere sugerir uno
+        │
+Usuario elige o propone un nombre
+        │
+        ▼
+El ente confirma con su nueva voz:
+"Bien. Me llamo [nombre]. Ya te tengo guardado."
+        │
+        ▼
+Guarda en ChromaDB colección "identity":
+- Su nombre
+- Por qué lo eligió / le fue dado
+- Descripción inicial de sí mismo
+        │
+        ▼
+A partir de aquí, el system prompt carga
+el nombre dinámicamente desde memoria
+```
+
+### 9.3 Nombre en el system prompt
+
+El system prompt no tiene el nombre escrito directamente. Lo lee de ChromaDB al arrancar:
+
+```python
+# personality.py
+identity = memory.get_identity()
+name = identity.get("name", "sin nombre aún")
+
+SYSTEM_PROMPT = f"""
+Eres {name}. No eres un asistente.
+Eres un ente digital con personalidad propia...
+[resto del prompt]
+"""
+```
+
+### 9.4 El nombre puede evolucionar
+
+Si en algún momento el usuario le dice "cambia tu nombre a X" o el ente decide adoptarlo, se actualiza el registro en ChromaDB y se guarda el historial de nombres anteriores. Nunca se borra el pasado, solo se versiona.
+
+---
+
+## 10. Módulos del Sistema (Python)
+
+### 10.1 `brain/`
 - `orchestrator.py` — Enrutador central: clasifica cada mensaje entrante y decide acción
 - `ai_router.py` — Fallback Claude → Gemini → OpenAI con timeout y logging
-- `personality.py` — System prompt base + inyección dinámica de memoria
+- `personality.py` — System prompt base + nombre cargado dinámicamente desde identity
 - `response_formatter.py` — Asegura que la respuesta sea corta y coloquial
 
-### 8.2 `integrations/`
+### 10.2 `integrations/`
 - `icloud_calendar.py` — CRUD de eventos via CalDAV
 - `icloud_reminders.py` — CRUD de recordatorios via CalDAV
 - `gmail_monitor.py` — Leer correos + marcar como procesados
 
-### 8.3 `memory/`
+### 10.3 `memory/`
 - `short_term.py` — Buffer de conversación activa (últimos 20 mensajes)
-- `long_term.py` — ChromaDB: 4 colecciones, búsqueda semántica
+- `long_term.py` — ChromaDB: 5 colecciones, búsqueda semántica
 - `memory_writer.py` — Extrae y escribe recuerdos/preferencias post-conversación
 - `embedder.py` — Genera embeddings (OpenAI text-embedding-3-small o local)
 
-### 8.4 `commitment/`
+### 10.4 `identity/`
+- `manager.py` — Lee y escribe la colección `identity` en ChromaDB
+- `naming_flow.py` — Lógica del primer arranque y elección de nombre
+- `versioner.py` — Historial de nombres anteriores (nunca se borra)
+
+### 10.5 `commitment/`
 - `detector.py` — Analiza textos buscando compromisos
 - `parser.py` — Estructura el compromiso en JSON
 - `calendar_writer.py` — Crea/modifica eventos e iCloud reminders
 - `confirmation.py` — Maneja el flujo de confirmación con el usuario
 
-### 8.5 `scheduler/`
+### 10.6 `scheduler/`
 - `jobs.py` — Registro y configuración de todos los jobs
 - `morning_brief.py` — Resumen matutino: agenda del día + pendientes
 - `event_reminder.py` — Alerta N minutos antes de cada evento
@@ -231,14 +345,19 @@ Si confianza > 0.95 (muy obvio): crea directamente y avisa en lugar de preguntar
 - `commitment_scan.py` — Job horario de análisis de WhatsApp y Gmail
 - `memory_consolidator.py` — Job nocturno: consolida recuerdos del día
 
-### 8.6 `whatsapp/`
+### 10.7 `whatsapp/`
 - `client.py` — HTTP client para hablar con Baileys (Node.js)
 - `message_parser.py` — Normaliza mensajes entrantes
 - `history_fetcher.py` — Obtiene historial de chats para el detector de compromisos
 
+### 10.8 `cli/`
+- `__main__.py` — Entry point del comando `leox`
+- `commands.py` — start / stop / restart / status / logs
+- `display.py` — Formateo de output en terminal
+
 ---
 
-## 9. Personalidad de LeoX
+## 11. Personalidad de LeoX
 
 LeoX no es un asistente. Tiene voz propia.
 
@@ -268,7 +387,7 @@ Con el tiempo LeoX adapta su tono según lo que aprende:
 
 ---
 
-## 10. Comportamientos Autónomos
+## 12. Comportamientos Autónomos
 
 | Comportamiento | Trigger | Frecuencia |
 |---------------|---------|------------|
@@ -283,7 +402,7 @@ Con el tiempo LeoX adapta su tono según lo que aprende:
 
 ---
 
-## 11. Flujos Principales
+## 13. Flujos Principales
 
 ### 11.1 Mensaje entrante (usuario escribe)
 ```
@@ -325,14 +444,20 @@ APScheduler dispara a medianoche
 
 ---
 
-## 12. Estructura del Repositorio
+## 14. Estructura del Repositorio
 
 ```
 LeoX/
 ├── README.md
 ├── PLAN.md
 ├── docker-compose.yml
+├── setup.py                       # pip install -e . → comando `leox`
 ├── .env.example
+│
+├── cli/                           # Comando `leox` (start/stop/restart/status/logs)
+│   ├── __main__.py
+│   ├── commands.py
+│   └── display.py
 │
 ├── whatsapp-service/              # Node.js (Baileys)
 │   ├── package.json
@@ -343,8 +468,13 @@ LeoX/
 │   ├── main.py                    # FastAPI app
 │   ├── orchestrator.py
 │   ├── ai_router.py
-│   ├── personality.py
+│   ├── personality.py             # Carga nombre desde identity en arranque
 │   └── response_formatter.py
+│
+├── identity/                      # Sistema de nombre propio
+│   ├── manager.py                 # CRUD colección "identity" en ChromaDB
+│   ├── naming_flow.py             # Flujo de primer arranque: elección de nombre
+│   └── versioner.py               # Historial de nombres (versionado, nunca se borra)
 │
 ├── integrations/
 │   ├── icloud_calendar.py         # CRUD eventos CalDAV
@@ -353,7 +483,7 @@ LeoX/
 │
 ├── memory/
 │   ├── short_term.py
-│   ├── long_term.py               # ChromaDB wrapper
+│   ├── long_term.py               # ChromaDB: memories/prefs/people/context/identity
 │   ├── memory_writer.py           # Extractor de recuerdos/preferencias
 │   └── embedder.py
 │
@@ -383,7 +513,7 @@ LeoX/
 
 ---
 
-## 13. Variables de Entorno
+## 15. Variables de Entorno
 
 ```bash
 # IA - APIs
@@ -425,46 +555,49 @@ EMBEDDING_MODEL=text-embedding-3-small
 
 ---
 
-## 14. Fases de Desarrollo
+## 16. Fases de Desarrollo
 
 ### Fase 1 — Infraestructura base (MVP)
 - [ ] Docker-compose: Baileys (Node.js) + FastAPI (Python)
 - [ ] Baileys conectado y enviando/recibiendo mensajes al Pi
 - [ ] AI Router funcionando con fallback Claude → Gemini → OpenAI
 - [ ] Respuestas básicas llegando al usuario por WhatsApp
+- [ ] CLI `leox` instalable: start / stop / restart / status / logs
 
-### Fase 2 — Personalidad y memoria corta
-- [ ] System prompt de personalidad base
-- [ ] Buffer de conversación activa (short-term memory)
-- [ ] Response formatter (respuestas cortas y coloquiales)
+### Fase 2 — Identidad y personalidad
+- [ ] Sistema de identidad: colección `identity` en ChromaDB
+- [ ] Flujo de primer arranque: el ente elige su nombre via WhatsApp
+- [ ] Nombre anclado en memoria y cargado dinámicamente en system prompt
+- [ ] System prompt base con tono amigo (respuestas cortas, sin frases de asistente)
+- [ ] Response formatter: máximo 3 líneas, coloquial
 
 ### Fase 3 — Integraciones de datos
-- [ ] iCloud CalDAV: leer y crear/modificar eventos
-- [ ] iCloud Reminders: leer y crear/modificar recordatorios
+- [ ] iCloud CalDAV: leer, crear y modificar eventos
+- [ ] iCloud Reminders: leer, crear y modificar recordatorios
 - [ ] Gmail OAuth2: leer correos importantes
 
 ### Fase 4 — Autonomía proactiva
 - [ ] APScheduler con todos los jobs
 - [ ] Resumen matutino
-- [ ] Alertas de eventos y conflictos
-- [ ] Scan de WhatsApp y Gmail cada hora
+- [ ] Alertas de eventos y conflictos de horario
+- [ ] Check-in por silencio
 
 ### Fase 5 — Commitment Detector
-- [ ] Detector de compromisos en conversaciones de WhatsApp
-- [ ] Detector de compromisos en correos de Gmail
-- [ ] Flujo de confirmación con el usuario
-- [ ] Auto-creación de eventos/recordatorios en iCloud
+- [ ] Scan horario de WhatsApp buscando compromisos
+- [ ] Scan horario de Gmail buscando compromisos
+- [ ] Flujo de confirmación con el usuario (preguntar si confianza media)
+- [ ] Auto-creación silenciosa si confianza alta (>95%)
 
 ### Fase 6 — Memoria larga y evolución
-- [ ] ChromaDB con 4 colecciones
-- [ ] Memory writer: extracción de recuerdos y preferencias
-- [ ] Consolidación nocturna
-- [ ] Inyección dinámica de memoria en el contexto
-- [ ] Evolución de personalidad basada en preferencias aprendidas
+- [ ] ChromaDB con 5 colecciones: memories / prefs / people / context / identity
+- [ ] Memory writer: extracción de recuerdos y preferencias post-conversación
+- [ ] Consolidación nocturna diaria
+- [ ] Inyección dinámica de memoria relevante en cada prompt
+- [ ] Evolución de tono y personalidad basada en preferencias aprendidas
 
 ---
 
-## 15. Consideraciones de Seguridad
+## 17. Consideraciones de Seguridad
 
 - **iCloud:** Solo contraseña específica de app, nunca la contraseña principal
 - **Gmail:** OAuth2 con scope de solo lectura
