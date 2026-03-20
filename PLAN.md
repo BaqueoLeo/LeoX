@@ -1,7 +1,7 @@
 # LeoX — Plan Técnico del Asistente Personal IA por WhatsApp
 
-> **Estado:** Planificación v3
-> **Fecha:** 2026-03-19
+> **Estado:** Planificación v4
+> **Fecha:** 2026-03-20
 > **Autor:** BaqueoLeo
 
 ---
@@ -74,6 +74,8 @@ LeoX no es un asistente. Es un **ente digital** con personalidad propia que vive
 | Scheduler | **APScheduler** (Python) | Tareas autónomas programadas |
 | Config | **python-dotenv** | Variables de entorno y secrets |
 | Containerización | **Docker + docker-compose** | Servicios aislados en el Pi |
+| Voz | **ElevenLabs API** | Text-to-speech → notas de voz por WhatsApp |
+| Navegación | **Google Places + Directions API** | Resolver lugares y calcular tiempo de viaje |
 
 ---
 
@@ -171,11 +173,14 @@ Cada hora:
   "fecha": "2026-03-21",
   "hora": "20:00",
   "persona": "Carlos",
+  "lugar": "Restaurante La Mar, Miraflores",
   "fuente": "whatsapp | gmail",
   "confianza": 0.9,
-  "texto_original": "dale, nos vemos el sábado a las 8"
+  "texto_original": "dale, nos vemos el sábado a las 8 en La Mar"
 }
 ```
+
+Si el compromiso incluye `lugar`, se lanza automáticamente el cálculo de tiempo de viaje (ver sección 7.4).
 
 ### 7.3 Flujo de confirmación
 
@@ -195,9 +200,85 @@ en iCloud    aprende
 
 Si confianza > 0.95 (muy obvio): crea directamente y avisa en lugar de preguntar.
 
+### 7.4 Cálculo de tiempo de viaje
+
+Cuando el compromiso tiene un lugar físico, el sistema calcula automáticamente la hora de salida:
+
+```
+Evento creado con lugar físico
+        │
+        ▼
+Google Places API → validar y normalizar el lugar
+        │
+        ▼
+Google Directions API (Distance Matrix)
+  → origen: HOME_ADDRESS (desde .env)
+  → destino: lugar validado
+  → modo: TRAVEL_MODE (driving por defecto)
+        │
+        ▼
+hora_salida = hora_evento − travel_time − TRAVEL_BUFFER_MINUTES
+        │
+        ▼
+Se crea un recordatorio extra en iCloud:
+"Sal a las [hora_salida] para [evento] en [lugar]"
+
+O bien, se incluye en el aviso del evento:
+"Cena con Carlos a las 8pm en La Mar.
+ Si vas en carro, sal a las 7:30."
+```
+
+El **morning brief** también incluye la hora de salida para cada evento del día que tenga ubicación.
+
 ---
 
-## 8. CLI `leox` — Gestión del servicio
+## 8. Notas de Voz (ElevenLabs)
+
+El ente puede comunicarse por **nota de voz** además de texto. Decide de forma contextual cuándo usar voz y cuándo texto.
+
+### 8.1 Cuándo usa voz
+
+| Situación | Formato preferido |
+|-----------|------------------|
+| Resumen matutino | Voz (configurable) |
+| Alertas urgentes | Voz |
+| Mensajes emocionales / check-in | Voz |
+| Respuestas cortas / preguntas | Texto |
+| Listas, datos, fechas | Texto |
+
+### 8.2 Flujo técnico
+
+```
+LLM decide enviar voz
+        │
+        ▼
+ElevenLabs API → genera audio MP3
+  (usando la voz configurada en ELEVENLABS_VOICE_ID)
+        │
+        ▼
+Convertir MP3 → OGG Opus (formato nativo de WhatsApp)
+  (via ffmpeg o pydub)
+        │
+        ▼
+Baileys.sendMessage({
+  audio: buffer,
+  mimetype: 'audio/ogg; codecs=opus',
+  ptt: true          ← aparece como nota de voz, no como archivo
+})
+        │
+        ▼
+Llega como nota de voz al usuario en WhatsApp ✓
+```
+
+### 8.3 Módulo
+
+`integrations/elevenlabs.py`:
+- `text_to_voice(text: str) -> bytes` — genera buffer OGG listo para Baileys
+- `decide_format(context: dict) -> Literal["voice", "text"]` — el LLM decide según contexto
+
+---
+
+## 9. CLI `leox` — Gestión del servicio
 
 **LeoX** es el nombre del proyecto y también el comando para controlarlo desde la terminal del Raspberry Pi.
 
@@ -210,7 +291,7 @@ leox logs       # Tail de logs en tiempo real (colores por servicio)
 leox logs -f    # Follow continuo
 ```
 
-### 8.1 Implementación del CLI
+### 9.1 Implementación del CLI
 
 `leox` es un script Python instalable (`pip install -e .`) que usa `docker-compose` internamente.
 
@@ -235,11 +316,11 @@ cli/
 
 ---
 
-## 9. Sistema de Identidad — El nombre del ente
+## 10. Sistema de Identidad — El nombre del ente
 
 El ente no tiene un nombre hardcodeado. **Elige su propio nombre** a través de la primera conversación por WhatsApp, y ese nombre queda anclado en su memoria vectorial para siempre.
 
-### 9.1 Colección `identity` en ChromaDB
+### 10.1 Colección `identity` en ChromaDB
 
 Una quinta colección exclusiva para la auto-concepción del ente:
 
@@ -253,7 +334,7 @@ Una quinta colección exclusiva para la auto-concepción del ente:
 }
 ```
 
-### 9.2 Flujo de primer arranque
+### 10.2 Flujo de primer arranque
 
 La primera vez que el usuario le escribe (o que el ente hace el primer contacto), detecta que no tiene nombre en memoria y abre el proceso de nombramiento:
 
@@ -284,7 +365,7 @@ A partir de aquí, el system prompt carga
 el nombre dinámicamente desde memoria
 ```
 
-### 9.3 Nombre en el system prompt
+### 10.3 Nombre en el system prompt
 
 El system prompt no tiene el nombre escrito directamente. Lo lee de ChromaDB al arrancar:
 
@@ -300,43 +381,45 @@ Eres un ente digital con personalidad propia...
 """
 ```
 
-### 9.4 El nombre puede evolucionar
+### 10.4 El nombre puede evolucionar
 
 Si en algún momento el usuario le dice "cambia tu nombre a X" o el ente decide adoptarlo, se actualiza el registro en ChromaDB y se guarda el historial de nombres anteriores. Nunca se borra el pasado, solo se versiona.
 
 ---
 
-## 10. Módulos del Sistema (Python)
+## 11. Módulos del Sistema (Python)
 
-### 10.1 `brain/`
+### 11.1 `brain/`
 - `orchestrator.py` — Enrutador central: clasifica cada mensaje entrante y decide acción
 - `ai_router.py` — Fallback Claude → Gemini → OpenAI con timeout y logging
 - `personality.py` — System prompt base + nombre cargado dinámicamente desde identity
 - `response_formatter.py` — Asegura que la respuesta sea corta y coloquial
 
-### 10.2 `integrations/`
+### 11.2 `integrations/`
 - `icloud_calendar.py` — CRUD de eventos via CalDAV
 - `icloud_reminders.py` — CRUD de recordatorios via CalDAV
 - `gmail_monitor.py` — Leer correos + marcar como procesados
+- `elevenlabs.py` — TTS → OGG: genera notas de voz para WhatsApp
+- `google_places.py` — Resolver lugares + calcular tiempo de viaje (Directions API)
 
-### 10.3 `memory/`
+### 11.3 `memory/`
 - `short_term.py` — Buffer de conversación activa (últimos 20 mensajes)
 - `long_term.py` — ChromaDB: 5 colecciones, búsqueda semántica
 - `memory_writer.py` — Extrae y escribe recuerdos/preferencias post-conversación
 - `embedder.py` — Genera embeddings (OpenAI text-embedding-3-small o local)
 
-### 10.4 `identity/`
+### 11.4 `identity/`
 - `manager.py` — Lee y escribe la colección `identity` en ChromaDB
 - `naming_flow.py` — Lógica del primer arranque y elección de nombre
 - `versioner.py` — Historial de nombres anteriores (nunca se borra)
 
-### 10.5 `commitment/`
+### 11.5 `commitment/`
 - `detector.py` — Analiza textos buscando compromisos
 - `parser.py` — Estructura el compromiso en JSON
 - `calendar_writer.py` — Crea/modifica eventos e iCloud reminders
 - `confirmation.py` — Maneja el flujo de confirmación con el usuario
 
-### 10.6 `scheduler/`
+### 11.6 `scheduler/`
 - `jobs.py` — Registro y configuración de todos los jobs
 - `morning_brief.py` — Resumen matutino: agenda del día + pendientes
 - `event_reminder.py` — Alerta N minutos antes de cada evento
@@ -345,19 +428,19 @@ Si en algún momento el usuario le dice "cambia tu nombre a X" o el ente decide 
 - `commitment_scan.py` — Job horario de análisis de WhatsApp y Gmail
 - `memory_consolidator.py` — Job nocturno: consolida recuerdos del día
 
-### 10.7 `whatsapp/`
+### 11.7 `whatsapp/`
 - `client.py` — HTTP client para hablar con Baileys (Node.js)
 - `message_parser.py` — Normaliza mensajes entrantes
 - `history_fetcher.py` — Obtiene historial de chats para el detector de compromisos
 
-### 10.8 `cli/`
+### 11.8 `cli/`
 - `__main__.py` — Entry point del comando `leox`
 - `commands.py` — start / stop / restart / status / logs
 - `display.py` — Formateo de output en terminal
 
 ---
 
-## 11. Personalidad de LeoX
+## 12. Personalidad de LeoX
 
 LeoX no es un asistente. Tiene voz propia.
 
@@ -387,7 +470,7 @@ Con el tiempo LeoX adapta su tono según lo que aprende:
 
 ---
 
-## 12. Comportamientos Autónomos
+## 13. Comportamientos Autónomos
 
 | Comportamiento | Trigger | Frecuencia |
 |---------------|---------|------------|
@@ -402,9 +485,9 @@ Con el tiempo LeoX adapta su tono según lo que aprende:
 
 ---
 
-## 13. Flujos Principales
+## 14. Flujos Principales
 
-### 11.1 Mensaje entrante (usuario escribe)
+### 14.1 Mensaje entrante (usuario escribe)
 ```
 Usuario escribe → Baileys → HTTP POST → Orchestrator
   │
@@ -417,7 +500,7 @@ Usuario escribe → Baileys → HTTP POST → Orchestrator
   └── Post-proceso: ¿guardar recuerdo nuevo?
 ```
 
-### 11.2 Scan horario de compromisos
+### 14.2 Scan horario de compromisos
 ```
 APScheduler dispara cada hora
   │
@@ -432,7 +515,7 @@ APScheduler dispara cada hora
         └── Preguntar al usuario antes de crear
 ```
 
-### 11.3 Consolidación nocturna de memoria
+### 14.3 Consolidación nocturna de memoria
 ```
 APScheduler dispara a medianoche
   │
@@ -444,7 +527,7 @@ APScheduler dispara a medianoche
 
 ---
 
-## 14. Estructura del Repositorio
+## 15. Estructura del Repositorio
 
 ```
 LeoX/
@@ -479,7 +562,9 @@ LeoX/
 ├── integrations/
 │   ├── icloud_calendar.py         # CRUD eventos CalDAV
 │   ├── icloud_reminders.py        # CRUD recordatorios CalDAV
-│   └── gmail_monitor.py           # Gmail OAuth2
+│   ├── gmail_monitor.py           # Gmail OAuth2
+│   ├── elevenlabs.py              # TTS → OGG para notas de voz por WhatsApp
+│   └── google_places.py           # Place search + tiempo de viaje (Directions API)
 │
 ├── memory/
 │   ├── short_term.py
@@ -513,7 +598,7 @@ LeoX/
 
 ---
 
-## 15. Variables de Entorno
+## 16. Variables de Entorno
 
 ```bash
 # IA - APIs
@@ -551,11 +636,23 @@ COMMITMENT_ASK_THRESHOLD=0.70          # Confianza para preguntar antes de crear
 # AI
 AI_TIMEOUT_SECONDS=15
 EMBEDDING_MODEL=text-embedding-3-small
+
+# ElevenLabs (notas de voz)
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=               # ID de la voz en ElevenLabs
+USE_VOICE_FOR_MORNING=true         # Resumen matutino en voz
+USE_VOICE_FOR_ALERTS=true          # Alertas urgentes en voz
+
+# Google Places + Directions (tiempo de viaje)
+GOOGLE_PLACES_API_KEY=
+HOME_ADDRESS=                      # Dirección base para calcular viajes
+TRAVEL_MODE=driving                # driving | transit | walking
+TRAVEL_BUFFER_MINUTES=15           # Margen extra antes del evento
 ```
 
 ---
 
-## 16. Fases de Desarrollo
+## 17. Fases de Desarrollo
 
 ### Fase 1 — Infraestructura base (MVP)
 - [ ] Docker-compose: Baileys (Node.js) + FastAPI (Python)
@@ -575,6 +672,9 @@ EMBEDDING_MODEL=text-embedding-3-small
 - [ ] iCloud CalDAV: leer, crear y modificar eventos
 - [ ] iCloud Reminders: leer, crear y modificar recordatorios
 - [ ] Gmail OAuth2: leer correos importantes
+- [ ] ElevenLabs: TTS → OGG → nota de voz por WhatsApp (morning brief + alertas)
+- [ ] Google Places: resolución y normalización de lugares
+- [ ] Google Directions: calcular tiempo de viaje y hora de salida al crear eventos
 
 ### Fase 4 — Autonomía proactiva
 - [ ] APScheduler con todos los jobs
@@ -597,7 +697,7 @@ EMBEDDING_MODEL=text-embedding-3-small
 
 ---
 
-## 17. Consideraciones de Seguridad
+## 18. Consideraciones de Seguridad
 
 - **iCloud:** Solo contraseña específica de app, nunca la contraseña principal
 - **Gmail:** OAuth2 con scope de solo lectura
@@ -609,4 +709,4 @@ EMBEDDING_MODEL=text-embedding-3-small
 
 ---
 
-*Documento actualizado con autonomía creativa, memory dual y commitment detection.*
+*Documento actualizado con autonomía creativa, memory dual, commitment detection, notas de voz (ElevenLabs) y cálculo de tiempo de viaje (Google Places).*
