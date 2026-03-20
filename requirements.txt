@@ -1,0 +1,33 @@
+# FastAPI + server
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+
+# AI providers
+anthropic==0.52.0
+google-genai==1.14.0
+openai==1.82.0
+
+# HTTP client
+httpx==0.28.1
+
+# Environment
+python-dotenv==1.1.0
+
+# ChromaDB (local vector DB)
+chromadb==0.6.3
+
+# Scheduler
+apscheduler==3.11.0
+
+# ElevenLabs (voice)
+elevenlabs==1.50.5
+
+# Google Maps
+googlemaps==4.10.0
+
+# Audio conversion
+pydub==0.25.1
+
+# CLI
+click==8.1.8
+rich==13.9.4
