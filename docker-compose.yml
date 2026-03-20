@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  whatsapp:
+    build: ./whatsapp-service
+    container_name: leox-whatsapp
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - BRAIN_URL=http://brain:8000
+      - MY_WHATSAPP_NUMBER=${MY_WHATSAPP_NUMBER}
+    volumes:
+      - ./whatsapp-service/session:/app/session
+    depends_on:
+      - brain
+    networks:
+      - leox-net
+
+  brain:
+    build:
+      context: .
+      dockerfile: brain/Dockerfile
+    container_name: leox-brain
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - WHATSAPP_SERVICE_URL=http://whatsapp:3000
+      - CHROMA_PERSIST_DIR=/data/chroma
+    volumes:
+      - chroma-data:/data/chroma
+    networks:
+      - leox-net
+
+volumes:
+  chroma-data:
+
+networks:
+  leox-net:
+    driver: bridge

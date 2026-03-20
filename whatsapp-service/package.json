@@ -1,0 +1,15 @@
+{
+  "name": "leox-whatsapp-service",
+  "version": "1.0.0",
+  "description": "WhatsApp bridge for LeoX using Baileys",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
