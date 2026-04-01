@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Openclaw</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f2f2f7;
+      --surface: #ffffff;
+      --bubble-out: #007aff;
+      --bubble-in: #e5e5ea;
+      --text-out: #ffffff;
+      --text-in: #000000;
+      --input-bg: #ffffff;
+      --border: #c6c6c8;
+      --placeholder: #8e8e93;
+      --typing: #8e8e93;
+      --send: #007aff;
+      --send-disabled: #c7c7cc;
+      --header-bg: rgba(242,242,247,0.85);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --bubble-out: #0a84ff;
+        --bubble-in: #2c2c2e;
+        --text-out: #ffffff;
+        --text-in: #ffffff;
+        --input-bg: #1c1c1e;
+        --border: #38383a;
+        --placeholder: #636366;
+        --typing: #636366;
+        --send: #0a84ff;
+        --send-disabled: #48484a;
+        --header-bg: rgba(0,0,0,0.85);
+      }
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    #header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--header-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: env(safe-area-inset-top, 0) 16px 10px;
+      padding-top: max(env(safe-area-inset-top), 14px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--bubble-out);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    #header-info { flex: 1; min-width: 0; }
+    #header-name { font-weight: 600; font-size: 17px; color: var(--text-in); }
+    #header-status { font-size: 12px; color: var(--placeholder); }
+
+    /* ── Messages ── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 75%;
+      animation: pop .18s ease-out;
+    }
+    @keyframes pop {
+      from { opacity: 0; transform: scale(.92); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    .msg.out { align-self: flex-end; align-items: flex-end; }
+    .msg.in  { align-self: flex-start; align-items: flex-start; }
+
+    .bubble {
+      padding: 9px 13px;
+      border-radius: 18px;
+      font-size: 16px;
+      line-height: 1.45;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .msg.out .bubble {
+      background: var(--bubble-out);
+      color: var(--text-out);
+      border-bottom-right-radius: 4px;
+    }
+    .msg.in .bubble {
+      background: var(--bubble-in);
+      color: var(--text-in);
+      border-bottom-left-radius: 4px;
+    }
+
+    .ts {
+      font-size: 11px;
+      color: var(--placeholder);
+      margin: 2px 4px 6px;
+    }
+
+    /* typing indicator */
+    #typing-row {
+      display: none;
+      align-self: flex-start;
+      align-items: flex-end;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    #typing-row.visible { display: flex; }
+    #typing-bubble {
+      background: var(--bubble-in);
+      border-radius: 18px;
+      border-bottom-left-radius: 4px;
+      padding: 10px 14px;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--typing);
+      animation: bounce 1.2s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+      0%,60%,100% { transform: translateY(0); }
+      30%          { transform: translateY(-5px); }
+    }
+
+    /* ── Input bar ── */
+    #input-bar {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 8px 16px;
+      padding-bottom: max(env(safe-area-inset-bottom), 12px);
+      background: var(--header-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+    }
+
+    #input-wrap {
+      flex: 1;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 8px 14px;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+    }
+
+    #input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 16px;
+      color: var(--text-in);
+      resize: none;
+      max-height: 120px;
+      overflow-y: auto;
+      line-height: 1.4;
+      -webkit-overflow-scrolling: touch;
+    }
+    #input::placeholder { color: var(--placeholder); }
+
+    #send-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      background: var(--send);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background .15s, opacity .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #send-btn:disabled { background: var(--send-disabled); cursor: default; }
+    #send-btn svg { pointer-events: none; }
+
+    /* ── Secret overlay ── */
+    #secret-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 32px;
+      z-index: 100;
+    }
+    #secret-overlay.hidden { display: none; }
+    #secret-overlay h2 { font-size: 22px; font-weight: 700; color: var(--text-in); text-align: center; }
+    #secret-overlay p  { font-size: 15px; color: var(--placeholder); text-align: center; }
+    #secret-input {
+      width: 100%;
+      max-width: 320px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-in);
+      font-size: 16px;
+      outline: none;
+      text-align: center;
+      letter-spacing: 2px;
+    }
+    #secret-btn {
+      width: 100%;
+      max-width: 320px;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      background: var(--send);
+      color: white;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #secret-error { color: #ff3b30; font-size: 14px; display: none; }
+    #secret-error.visible { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- Secret gate (shown if WEB_SECRET is required) -->
+<div id="secret-overlay" class="hidden">
+  <div id="avatar" style="width:56px;height:56px;font-size:28px">🐾</div>
+  <h2>Openclaw</h2>
+  <p>Ingresa la clave de acceso</p>
+  <input id="secret-input" type="password" placeholder="••••••••" autocomplete="current-password" />
+  <p id="secret-error">Clave incorrecta. Intenta de nuevo.</p>
+  <button id="secret-btn">Continuar</button>
+</div>
+
+<div id="app">
+  <div id="header">
+    <div id="avatar">🐾</div>
+    <div id="header-info">
+      <div id="header-name">Openclaw</div>
+      <div id="header-status">en línea</div>
+    </div>
+  </div>
+
+  <div id="messages">
+    <!-- messages rendered here -->
+    <div id="typing-row">
+      <div id="typing-bubble">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="input-bar">
+    <div id="input-wrap">
+      <textarea id="input" rows="1" placeholder="Mensaje…"></textarea>
+    </div>
+    <button id="send-btn" disabled aria-label="Enviar">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 13V3M8 3L3 8M8 3l5 5" stroke="white" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+  (() => {
+    /* ── Config ── */
+    const SECRET_KEY = 'oc_secret';
+    const SESSION_KEY = 'oc_session';
+    const API_PATH = '/web/message';
+
+    /* ── State ── */
+    let sessionId = localStorage.getItem(SESSION_KEY);
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem(SESSION_KEY, sessionId);
+    }
+
+    let secret = localStorage.getItem(SECRET_KEY) || '';
+    let busy = false;
+
+    /* ── Elements ── */
+    const overlay      = document.getElementById('secret-overlay');
+    const secretInput  = document.getElementById('secret-input');
+    const secretBtn    = document.getElementById('secret-btn');
+    const secretErr    = document.getElementById('secret-error');
+    const messagesEl   = document.getElementById('messages');
+    const typingRow    = document.getElementById('typing-row');
+    const inputEl      = document.getElementById('input');
+    const sendBtn      = document.getElementById('send-btn');
+
+    /* ── Secret gate ── */
+    async function probeSecret(s) {
+      try {
+        const r = await fetch(API_PATH, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Web-Secret': s },
+          body: JSON.stringify({ text: '__ping__', session_id: sessionId }),
+        });
+        return r.status !== 401;
+      } catch { return false; }
+    }
+
+    async function initSecret() {
+      // If no secret stored, try empty first (server may not require one)
+      const needed = !(await probeSecret(secret));
+      if (!needed) { overlay.classList.add('hidden'); return; }
+      overlay.classList.remove('hidden');
+    }
+
+    secretBtn.addEventListener('click', async () => {
+      const val = secretInput.value.trim();
+      if (!val) return;
+      secretBtn.disabled = true;
+      const ok = await probeSecret(val);
+      secretBtn.disabled = false;
+      if (ok) {
+        secret = val;
+        localStorage.setItem(SECRET_KEY, secret);
+        overlay.classList.add('hidden');
+        inputEl.focus();
+      } else {
+        secretErr.classList.add('visible');
+        secretInput.value = '';
+        secretInput.focus();
+      }
+    });
+    secretInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') secretBtn.click();
+    });
+
+    /* ── Helpers ── */
+    function now() {
+      return new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function appendMsg(text, dir) {
+      const wrap = document.createElement('div');
+      wrap.className = `msg ${dir}`;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.textContent = text;
+
+      const ts = document.createElement('div');
+      ts.className = 'ts';
+      ts.textContent = now();
+
+      wrap.appendChild(bubble);
+      wrap.appendChild(ts);
+
+      // insert before typing indicator row
+      messagesEl.insertBefore(wrap, typingRow);
+      scrollBottom();
+    }
+
+    function scrollBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function setTyping(on) {
+      typingRow.classList.toggle('visible', on);
+      if (on) scrollBottom();
+    }
+
+    function setBusy(on) {
+      busy = on;
+      sendBtn.disabled = on || !inputEl.value.trim();
+      inputEl.disabled = on;
+    }
+
+    /* ── Send ── */
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text || busy) return;
+
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      sendBtn.disabled = true;
+
+      appendMsg(text, 'out');
+      setBusy(true);
+      setTyping(true);
+
+      try {
+        const res = await fetch(API_PATH, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Web-Secret': secret,
+          },
+          body: JSON.stringify({ text, session_id: sessionId }),
+        });
+
+        if (res.status === 401) {
+          // Secret became invalid — re-show gate
+          localStorage.removeItem(SECRET_KEY);
+          secret = '';
+          setTyping(false);
+          setBusy(false);
+          overlay.classList.remove('hidden');
+          return;
+        }
+
+        const data = await res.json();
+        setTyping(false);
+        appendMsg(data.reply || '…', 'in');
+      } catch (err) {
+        setTyping(false);
+        appendMsg('Error de conexión. Intenta de nuevo.', 'in');
+        console.error(err);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    /* ── Input auto-resize ── */
+    inputEl.addEventListener('input', () => {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = inputEl.scrollHeight + 'px';
+      sendBtn.disabled = !inputEl.value.trim() || busy;
+    });
+
+    inputEl.addEventListener('keydown', e => {
+      // Send on Enter (not Shift+Enter)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    sendBtn.addEventListener('click', send);
+
+    /* ── Init ── */
+    initSecret();
+  })();
+</script>
+</body>
+</html>

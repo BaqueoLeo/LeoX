@@ -1,0 +1,36 @@
+# Fly.io deployment config for Openclaw brain
+# Deploy with: fly deploy
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "openclaw-brain"
+primary_region = "mia"  # Miami — closest to LATAM
+
+[build]
+  dockerfile = "brain/Dockerfile"
+  # Build context is the repo root so brain/ and requirements.txt are available
+
+[env]
+  PORT = "8000"
+  CHROMA_PERSIST_DIR = "/data/chroma"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false   # keep alive 24/7 (no sleep)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# Persistent volume for ChromaDB (memory storage)
+[[mounts]]
+  source = "chroma_data"
+  destination = "/data/chroma"
